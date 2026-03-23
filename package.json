@@ -1,14 +1,14 @@
 {
   "name": "avr-asr-vosk",
-  "version": "1.0.0",
-  "author": "Agent Voice Response <info@agentvoiceresponse.com>",
+  "version": "1.0.1",
+  "author": "Greicodex <info@greicodex.com>",
   "description": "Vosk ASR service for Agent Voice Response",
   "main": "index.js",
   "scripts": {
     "start": "node .",
     "start:dev": "nodemon --inspect ./index.js",
-    "dc:build": "docker build --platform=linux/amd64 -t agentvoiceresponse/avr-asr-vosk:latest -t agentvoiceresponse/avr-asr-vosk:${npm_package_version} .",
-    "dc:push": "docker push agentvoiceresponse/avr-asr-vosk:latest && docker push agentvoiceresponse/avr-asr-vosk:${npm_package_version}"
+    "dc:build": "docker build --platform=linux/amd64 -t greicodex/avr-asr-vosk:latest -t greicodex/avr-asr-vosk:${npm_package_version} .",
+    "dc:push": "docker push greicodex/avr-asr-vosk:latest && docker push greicodex/avr-asr-vosk:${npm_package_version}"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
@@ -23,6 +23,11 @@
       "name": "Giuseppe Careri",
       "email": "info@gcareri.com",
       "url": "https://www.gcareri.com"
+    },
+    {
+      "name": "Javier Munoz",
+      "email": "info@greicodex.com",
+      "url": "https://greicodex.com"
     }
   ]
 }

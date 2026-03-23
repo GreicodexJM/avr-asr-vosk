@@ -20,61 +20,48 @@ if (!fs.existsSync(modelPath)) {
   process.exit();
 }
 
+const VOSK_SAMPLE_RATE = 16000;
+
 /**
- * Advanced upsampling from 8kHz to 16kHz using linear interpolation
- * @param {Buffer} audioBuffer - Input audio buffer at 8kHz
- * @returns {Buffer} - Upsampled audio buffer at 16kHz
+ * Resample audio to 16kHz using linear interpolation.
+ * Handles any integer or fractional input sample rate.
+ * @param {Buffer} audioBuffer - Input audio buffer (16-bit PCM, little-endian)
+ * @param {number} inputRate - Sample rate of the input audio in Hz
+ * @returns {Buffer} - Resampled audio buffer at 16kHz
  */
-const upsampleAudio = (audioBuffer) => {
-  // Validate input
+const resampleAudio = (audioBuffer, inputRate) => {
   if (!audioBuffer || audioBuffer.length === 0) {
     console.warn("Empty or null audio buffer received");
     return Buffer.alloc(0);
   }
-  
-  // Ensure buffer length is even (16-bit samples)
+
   if (audioBuffer.length % 2 !== 0) {
     console.warn("Audio buffer length is odd, truncating last byte");
     audioBuffer = audioBuffer.slice(0, audioBuffer.length - 1);
   }
-  
-  const inputSamples = audioBuffer.length / 2; // 16-bit samples
-  
-  if (inputSamples === 0) {
-    return Buffer.alloc(0);
-  }
-  
-  const outputSamples = inputSamples * 2; // Double the number of samples
+
+  const inputSamples = audioBuffer.length / 2;
+  if (inputSamples === 0) return Buffer.alloc(0);
+
+  if (inputRate === VOSK_SAMPLE_RATE) return audioBuffer;
+
+  const ratio = inputRate / VOSK_SAMPLE_RATE; // input positions per output sample
+  const outputSamples = Math.round(inputSamples / ratio);
   const outputBuffer = Buffer.alloc(outputSamples * 2);
-  
+
   for (let i = 0; i < outputSamples; i++) {
-    if (i % 2 === 0) {
-      // Keep original samples at even positions
-      const originalIndex = i / 2;
-      if (originalIndex < inputSamples) {
-        const sample = audioBuffer.readInt16LE(originalIndex * 2);
-        outputBuffer.writeInt16LE(sample, i * 2);
-      }
-    } else {
-      // Interpolate samples at odd positions
-      const prevIndex = Math.floor(i / 2);
-      const nextIndex = Math.ceil(i / 2);
-      
-      if (prevIndex < inputSamples && nextIndex < inputSamples) {
-        const prevSample = audioBuffer.readInt16LE(prevIndex * 2);
-        const nextSample = audioBuffer.readInt16LE(nextIndex * 2);
-        
-        // Linear interpolation
-        const interpolatedSample = Math.round((prevSample + nextSample) / 2);
-        outputBuffer.writeInt16LE(interpolatedSample, i * 2);
-      } else if (prevIndex < inputSamples) {
-        // Use previous sample if next is out of bounds
-        const sample = audioBuffer.readInt16LE(prevIndex * 2);
-        outputBuffer.writeInt16LE(sample, i * 2);
-      }
-    }
+    const srcPos = i * ratio;
+    const srcIndex = Math.floor(srcPos);
+    const frac = srcPos - srcIndex;
+
+    const s0 = audioBuffer.readInt16LE(srcIndex * 2);
+    const s1 = srcIndex + 1 < inputSamples
+      ? audioBuffer.readInt16LE((srcIndex + 1) * 2)
+      : s0;
+
+    outputBuffer.writeInt16LE(Math.round(s0 + frac * (s1 - s0)), i * 2);
   }
-  
+
   return outputBuffer;
 };
 
@@ -87,9 +74,9 @@ const upsampleAudio = (audioBuffer) => {
  */
 const handleAudioStream = async (req, res) => {
   try {
+    const inputRate = parseInt(req.headers["x-sample-rate"], 10) || 8000;
     const model = new vosk.Model(modelPath);
-    const sampleRate = 16000; // Vosk expects 16kHz
-    const rec = new vosk.Recognizer({ model: model, sampleRate: sampleRate });
+    const rec = new vosk.Recognizer({ model: model, sampleRate: VOSK_SAMPLE_RATE });
 
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
@@ -97,27 +84,23 @@ const handleAudioStream = async (req, res) => {
 
     req.on("data", async (chunk) => {      
       try {
-        // Upsample from 8kHz to 16kHz
-        const upsampledChunk = upsampleAudio(chunk);
-        
-        // Validate upsampled chunk
-        if (upsampledChunk.length === 0) {
-          console.warn("Warning: Upsampled chunk is empty");
+        const resampledChunk = resampleAudio(chunk, inputRate);
+
+        if (resampledChunk.length === 0) {
+          console.warn("Warning: Resampled chunk is empty");
           return;
         }
-        
-        // Use synchronous acceptWaveform (the correct API)
-        if (rec.acceptWaveform(upsampledChunk)) {
+
+        if (rec.acceptWaveform(resampledChunk)) {
           const result = rec.result();
           console.log("Partial result:", result);
           if (result.text) {
-            // Send partial results to client
             res.write(result.text);
           }
         }
       } catch (error) {
         console.error("Error processing audio chunk:", error);
-        console.error("Chunk details - Original:", chunk.length, "Upsampled:", upsampledChunk?.length || 0);
+        console.error("Chunk details - Original:", chunk.length, "Resampled:", resampledChunk?.length || 0);
       }
     });
 
